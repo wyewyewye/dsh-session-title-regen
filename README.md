@@ -91,6 +91,28 @@ curl -X POST http://127.0.0.1:3080/api/dsh-session-title-regen/generate
 
 3️⃣ 界面自检：重启宿主后，任选一个**已经聊过几轮**的会话 → 行右侧 “…” → 应出现「AI 重新生成标题」→ 点击后弹预览（显示所用模型）→ 确认后会话标题立即变化。
 
+## 更新
+
+> 更新后一律**重启宿主**（client bundle 只在启动时进入 bundle 图，刷新页面无效），再按上方「验证」复查——浏览器 DevTools 里 `__DSH_BOOT__.entries` 中本插件 bundle URL 的 `?rev=` 内容哈希应变。
+
+- **Web（`github:` 安装）**：重跑安装命令即取默认分支最新：
+
+  ```powershell
+  dsh plugin --profile web add github:wyewyewye/dsh-session-title-regen
+  ```
+
+  想固定/回退版本就用仓库 tag 引用：`github:wyewyewye/dsh-session-title-regen#v0.1.0`（tag 与 GitHub Release 同步发布）。
+
+- **官方桌面客户端**：在桌面端会话里直接对 DSH 说：
+
+  > 请使用当前桌面端内置的 `plugin_manager` 把 `dsh-session-title-regen` 更新到最新，完成后告诉我是否需要重启。
+
+  完成后**完全退出客户端（含托盘）再打开**。
+
+- **本地 tarball（方式 B）开发**：在源码目录 bump `version` → `pnpm pack` → 新 tgz 放进 profile 的 `vendor\` → 把 profile `package.json` 里的依赖改成新 tgz 文件名 → 在 profile 目录执行 `pnpm update dsh-session-title-regen`（强制按新 tarball 重解析，防 lockfile 沿用旧解析）→ 重启。`vendor\` 里的旧 tgz 不会自动清理，可手动删。
+
+- 本插件**没有自带“检查更新”界面**（无独立面板可挂按钮）：更新入口就是上面的插件管理器 / 命令行；版本以 GitHub Release 为准。
+
 ## 常见问题
 
 - **“…” 菜单里没有这一行**：按顺序核对——① `dsh.profile.bundles` 里有没有包名；② 装完是否**重启**过宿主（不是刷新页面）；③ `node_modules\dsh-session-title-regen` 是**真实目录**还是 junction（`Get-Item ... | Select LinkType`，junction 就按「方式 B」换 tarball 装）。
