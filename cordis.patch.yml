@@ -1,0 +1,7 @@
+# dsh-session-title-regen — on-demand "AI regenerate title" session menu action.
+# The plugin needs no configuration: the title call always uses the route the
+# session itself last used (provider/model from its latest request/header fold),
+# so the patch entry only mounts the bundle.
+- insert:
+    - id: session-title-regen
+      name: dsh-session-title-regen
