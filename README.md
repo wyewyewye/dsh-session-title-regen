@@ -1,39 +1,120 @@
-# dsh-session-title-regen
+# DSH 会话标题 AI 重生成（dsh-session-title-regen）
 
-DeepSeek Harness（DSH）插件：在左侧工作区侧边栏每个会话行右侧的 **“…”扩展菜单** 中新增 **“AI 重新生成标题”**（与置顶/重命名/分叉/归档同列，位于“复制会话 ID”之后）。
+DeepSeek Harness（DSH）插件：在左侧工作区侧边栏每个会话行右侧的 **“…”扩展菜单** 中新增 **“AI 重新生成标题”**（与置顶/重命名/分叉/归档同列，位于“复制会话 ID”之后）。根据**该会话自己的最近 10 轮用户 prompt**、用**该会话最近实际使用的模型**现场生成一个新标题，预览确认后写回。
 
-## 功能
+## 特性
 
-- 读取该会话持久化事件日志中**用户最近的 10 轮 prompt**（`user/message` 事件，`source.kind === "user"`，跳过工具结果与空白消息）。
-- 调用**该会话最近一次实际使用的模型**（从日志中最后一条 `request/header` 折叠出 provider/model，不改动全局标题服务配置）。
-- 生成走 `ctx.llm.prepareCall`，取模型最低档 reasoning（若有），`maxTokens=64`，30 秒超时，输入上限 16 KB（超限自动丢弃最旧的 prompt）。
-- 弹出可编辑预览对话框（显示所用模型），确认后通过内置 rename 路径（`sessions.using(...).binding.session.rename`）写回，侧边栏行即时更新。
+- 🤖 **入口顺手**：会话行 “…” 菜单里的一行「AI 重新生成标题」，不占用、不改动任何现有菜单项
+- 📜 **数据源是本机会话日志**：读取该会话持久化事件日志里用户最近的 10 轮 prompt（`user/message` 事件，`source.kind === "user"`，自动跳过工具结果与空白消息），不联网、不依赖全局标题服务的缓存
+- 🎯 **模型跟随会话本身**：从日志最后一条 `request/header` 折叠出 provider/model 现场调用——你在会话里用什么模型，标题就用什么模型生成；**不改动全局标题服务配置**，也不替换内置 sessionTitle provider
+- ✏️ **可编辑预览**：生成后先弹预览对话框（显示所用模型），可改字再确认；写回走内置 rename 路径（`sessions.using(...).binding.session.rename`），侧边栏行即时更新，其它设备按普通标题事件同步
+- ⚡ **轻量调用**：`maxTokens=64`、30 秒超时、输入上限 16 KB（超限自动丢弃最旧的 prompt）、取模型最低档 reasoning（若有）
+- 🧩 **零配置、零侵入**：无设置面板、无环境变量、不新增任何持久化文件（标题就是会话日志里一条标准 `session/title` 事件，与手动重命名完全同格式）；卸载删两行即净
 
-## 形态
+## 工作原理
 
-- **node 半**（`lib/index.js`）：注册 loopback-only 桥接路由 `POST /api/dsh-session-title-regen/generate`，body `{sessionId, currentTitle?}`，返回 `{ok, title, model:{provider,model}}` 或 `{ok:false, code, message}`。
-- **client 半**（`lib/client.js`，手写 ModuleLoader factory，仅依赖 react）：向 `sidebar.workspaces.session.menu.item` 注入 order 500 的菜单行（位于“复制会话 ID”之后），向 `shell.overlay` 注入预览对话框；样式自带（`dshstr-` 前缀，支持深浅色）。
+- **client 半**（`lib/client.js`，ModuleLoader factory，仅依赖 react）：向 `sidebar.workspaces.session.menu.item` 注入 order 500 的菜单行（位于“复制会话 ID”之后），向 `shell.overlay` 注入预览对话框；样式自带（`dshstr-` 前缀，深浅色自适应）。
+- **node 半**（`lib/index.js`）：注册 loopback-only 桥接路由 `POST /api/dsh-session-title-regen/generate`，body `{sessionId, currentTitle?}`；经 `ctx.sessionQuery.readSession` 读冷会话日志 → 取最近 10 轮用户 prompt + 最近 `request/header` 的模型路由 → `ctx.llm.prepareCall` 生成 → 返回 `{ok, title, model:{provider,model}}` 或 `{ok:false, code, message}`。
+- 提示词与标题归一化（`normalizeSessionTitle`、去整行 `**` 强调、UTF-8 字节截断）对齐官方 `dsh-session-title-all-prompts-llm`，但语义为“重新生成”：**始终产出新标题**，旧标题仅作上下文。
+
+## 目录结构
+
+```text
+dsh-session-title-regen/
+├── package.json              # DSH bundle 插件元数据（dsh.bundle.patch 指向 cordis.patch.yml；dsh.client 声明 client 半注入的宿主包）
+├── cordis.patch.yml          # 插件挂载声明（仅 insert 本插件的 client bundle，无其它改动）
+├── lib/
+│   ├── index.js              # node 半：桥接路由（读会话日志 + 折叠模型路由 + 调 LLM）
+│   └── client.js             # client 半：菜单项 + 预览对话框（react，样式自带）
+├── README.md
+└── LICENSE                   # MIT
+```
+
+运行时**不新增任何数据文件**：确认标题后只是向该会话的事件日志 append 一条 `session/title` 事件（与手动重命名同一路径、同一格式）。
 
 ## 安装
 
-> ⚠️ 必须以**真实文件目录**形式存在于 profile 的 `node_modules` 里，不能用 junction/symlink：
-> 运行时 client-modules 扫描器经 loader 内部解析器解析 bundle 目录，指向 profile 树外的链接会
-> 被静默 catch 跳过（`dsh-client-modules/lib/index.js:788`），bundle 便不会进入浏览器 bundle 图。
-> （pnpm `link:` 跨盘安装恰好产生这种 junction——这就是当初“装好了但菜单不出现”的原因。）
+> ⚠️ **安装来源决定成败**：本插件的 client 半要进入浏览器的 bundle 图，而 DSH 的 client-modules 扫描器会**静默跳过 junction/symlink 形态的 bundle 目录**（`dsh-client-modules/lib/index.js:788` 的 catch）。
+> `github:`、npm、tarball（`file:xxx.tgz`）依赖都会装成**真实目录**，没问题；
+> 但 pnpm 对 `link:<目录>` / `file:<目录>` 本地依赖**只会建 junction**——装完“菜单不出现、也不报错”多半就是这个。
+> 本地开发装法见下方「方式 B」。
+
+### 方式 A：从 GitHub 安装（推荐）
+
+**Web（`dsh web`）**：
 
 ```powershell
-# 推荐：从 GitHub 安装（pnpm 原生，装出来是真实目录）
-cd ~/.dsh/profiles/desktop        # 桌面版；网页版为 ~/.dsh/profiles/web
-pnpm add github:wyewyewye/dsh-session-title-regen
-# 然后在 profile 的 package.json 里把 "dsh-session-title-regen" 追加进
-# dsh.profile.bundles 数组，重启 DSH 即可。
+dsh plugin --profile web add github:wyewyewye/dsh-session-title-regen
+# 重启 dsh web，浏览器 F5
 ```
 
-> 注意：`link:`/`file:<目录>` 本地依赖会被 pnpm 建成 junction 而被扫描器跳过（见上方警告）；
-> `github:`、registry 或 tarball（`file:xxx.tgz`）依赖都会装成真实目录，不受影响。
+`dsh plugin` 会转发给 pnpm 并在成功后自动把包名追加进 `dsh.profile.bundles`，无需手改。
 
-## 说明
+**官方桌面客户端（Electron）**：桌面端读的是 `desktop` profile，`dsh plugin` 命令行按设计拒绝 `--profile desktop`。在桌面端会话里直接对 DSH 说：
 
-- 无需任何配置：模型路由永远跟随会话自身（`cordis.patch.yml` 仅挂载 bundle）。
-- 会话从未发起过模型调用（无 `request/header`）时返回 `no-model-route` 错误并在对话框中提示。
-- 提示词与标题归一化（`normalizeSessionTitle`、去整行 `**` 强调、UTF-8 字节截断）对齐官方 `dsh-session-title-all-prompts-llm`，但语义为“重新生成”：始终产出新标题，旧标题仅作上下文。
+> 请使用当前桌面端内置的 `plugin_manager` 安装 `github:wyewyewye/dsh-session-title-regen`，完成后告诉我是否需要重启。
+
+装完**完全退出客户端（含托盘）再打开**（新装插件的 client bundle 在启动时才会进入 bundle 图）。
+
+### 方式 B：本地目录 / tarball 安装（开发调试）
+
+```powershell
+# 在插件源码目录（package.json 所在层）打包
+pnpm pack
+# 把 tarball 放进 profile 目录后按 tarball 依赖安装（真实目录，扫描器认）
+pnpm add file:./vendor/dsh-session-title-regen-<版本>.tgz   # 在 profile 目录里执行
+# 再手动把 "dsh-session-title-regen" 追加进 package.json 的 dsh.profile.bundles，重启 DSH
+```
+
+- ⚠️ 不要用 `link:<目录>` / `file:<目录>`：会被 pnpm 建成 junction 而被扫描器跳过（见上方警告）。
+- ⚠️ 若 lockfile 里残留旧的 `link:` 解析（改过依赖写法后 `pnpm install` 可能沿用旧解析），用 `pnpm update dsh-session-title-regen` 强制按 tarball 重新解析。
+
+### 给 AI 的安装说明
+
+```
+请安装 DSH 插件 dsh-session-title-regen，来源 github:wyewyewye/dsh-session-title-regen。
+- 如果当前是官方桌面客户端：使用宿主内置 plugin_manager 安装，不要执行 Web 命令行、不要手改 desktop profile 文件。
+- 如果是 dsh web：dsh plugin --profile web add github:wyewyewye/dsh-session-title-regen，
+  确认 dsh --profile web --dump-config 的 bundles 里出现该包名，然后重启 dsh web。
+- 装完务必重启宿主（client bundle 只在启动时进入 bundle 图），不要以“菜单没出现”直接判定安装失败。
+```
+
+## 验证
+
+```powershell
+# 1) bundle 已登记（Web profile；桌面端看 %USERPROFILE%\.dsh\profiles\desktop\package.json）
+dsh --profile web --dump-config | Select-String title-regen
+
+# 2) 路由已注册（裸 curl 会被 DSH 浏览器信任栅栏拦成 401 —— 401/403 恰恰说明路由活着）
+curl -X POST http://127.0.0.1:3080/api/dsh-session-title-regen/generate
+```
+
+3️⃣ 界面自检：重启宿主后，任选一个**已经聊过几轮**的会话 → 行右侧 “…” → 应出现「AI 重新生成标题」→ 点击后弹预览（显示所用模型）→ 确认后会话标题立即变化。
+
+## 常见问题
+
+- **“…” 菜单里没有这一行**：按顺序核对——① `dsh.profile.bundles` 里有没有包名；② 装完是否**重启**过宿主（不是刷新页面）；③ `node_modules\dsh-session-title-regen` 是**真实目录**还是 junction（`Get-Item ... | Select LinkType`，junction 就按「方式 B」换 tarball 装）。
+- **对话框报 `no-model-route`**：该会话从未发起过模型调用（日志里没有 `request/header`），比如刚新建的空会话。换一个聊过几轮的会话即可。
+- **报 `session-not-found` / 读不到日志**：会话 ID 对应的日志文件不存在（已删除的会话、或冷日志路径异常）。
+- **裸 `curl` 返回 401/403**：DSH 对所有插件路由套了浏览器信任栅栏，不带会话凭据的命令行请求被拒是**预期行为**，不是接口坏了。
+- **DSH 升级后菜单消失或生成失败**：本插件读取的 `user/message`、`request/header` 事件格式与 `sidebar.workspaces.session.menu.item` 槽名属于 DSH 内部契约，大版本重构时可能需要适配（当前声明兼容见 `package.json` 的 `compatibility` 字段），欢迎提 issue。
+
+## 卸载
+
+```powershell
+dsh plugin --profile web remove dsh-session-title-regen    # Web
+# 桌面端：从 profiles\desktop\package.json 的 bundles 与 dependencies 里删掉该包名，重启
+```
+
+无残留数据：插件没有自己的配置文件，已写入的标题就是普通会话标题事件，卸载后照常显示。
+
+## 开发与维护
+
+- `lib/index.js`（node 半）改动需**重启宿主**；`lib/client.js`（client 半）改动需**重启宿主**（client bundle 随宿主启动装载，且 URL 带内容 hash，无需手动清缓存）。
+- 模型路由折叠逻辑在 `lib/index.js` 的 `latestRoute()`；prompt 采集在 `collectPrompts()`（10 轮 / 16 KB 上限这两个常量就在这里）；改这两个不影响其它插件。
+- 标题生成不经过全局 sessionTitle provider，因此与官方自动标题、其它标题类插件互不影响。
+- 版本策略：语义化版本；DSH 内部契约变化时提升 `compatibility` 声明并在新版本里适配。
+
+## 许可
+
+MIT © 2026 wyewyewye
