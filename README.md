@@ -8,7 +8,7 @@ DeepSeek Harness（DSH）插件：在左侧工作区侧边栏每个会话行右�
 - 📜 **数据源是本机会话日志**：读取该会话持久化事件日志里用户最近的 10 轮 prompt（`user/message` 事件，`source.kind === "user"`，自动跳过工具结果与空白消息），不联网、不依赖全局标题服务的缓存
 - 🎯 **模型跟随会话本身**：从日志最后一条 `request/header` 折叠出 provider/model 现场调用——你在会话里用什么模型，标题就用什么模型生成；**不改动全局标题服务配置**，也不替换内置 sessionTitle provider
 - ✏️ **可编辑预览**：生成后先弹预览对话框（显示所用模型），可改字再确认；写回走内置 rename 路径（`sessions.using(...).binding.session.rename`），侧边栏行即时更新，其它设备按普通标题事件同步
-- ⚡ **轻量调用**：`maxTokens=64`、30 秒超时、输入上限 16 KB（超限自动丢弃最旧的 prompt）、取模型最低档 reasoning（若有）
+- ⚡ **轻量调用**：`maxTokens=512`、30 秒超时、输入上限 16 KB（超限自动丢弃最旧的 prompt）、思考档位优先 `none`、否则取最低档（若有）
 - 🧩 **零配置、零侵入**：无设置面板、无环境变量、不新增任何持久化文件（标题就是会话日志里一条标准 `session/title` 事件，与手动重命名完全同格式）；卸载删两行即净
 
 ## 工作原理
@@ -119,6 +119,7 @@ curl -X POST http://127.0.0.1:3080/api/dsh-session-title-regen/generate
 - **对话框报 `no-model-route`**：该会话从未发起过模型调用（日志里没有 `request/header`），比如刚新建的空会话。换一个聊过几轮的会话即可。
 - **报 `session-not-found` / 读不到日志**：会话 ID 对应的日志文件不存在（已删除的会话、或冷日志路径异常）。
 - **裸 `curl` 返回 401/403**：DSH 对所有插件路由套了浏览器信任栅栏，不带会话凭据的命令行请求被拒是**预期行为**，不是接口坏了。
+- **llama.cpp 类后端报 `empty-title`（标题为空）**：这类后端**默认开思考**，而 profile 里 `off: null` 的语义是"支持该档但什么都不发"——请求不带 `reasoning_effort`，后端继续思考，思考 token 吃光输出预算，正文就成了空串。修法：在 profile 的该模型 `reasoningEfforts` 里把 off 档映射成后端认的显式关闭值，例如 `off: none`（llama.cpp 收到 `reasoning_effort=none` 即关思考；profile 改动**即时生效，无需重启**）。插件侧自 v0.1.1 起把输出预算提到 512 token，模型即便思考也饿不死标题，但真正关思考要靠上面的 profile 映射。
 - **DSH 升级后菜单消失或生成失败**：本插件读取的 `user/message`、`request/header` 事件格式与 `sidebar.workspaces.session.menu.item` 槽名属于 DSH 内部契约，大版本重构时可能需要适配（当前声明兼容见 `package.json` 的 `compatibility` 字段），欢迎提 issue。
 
 ## 卸载

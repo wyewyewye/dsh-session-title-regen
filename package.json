@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-title-regen",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DSH plugin: adds \"AI 重新生成标题\" to the \"...\" overflow menu on each session row in the left workspace sidebar. Collects the session's last 10 user prompts from its persisted event log, calls the model the session last used (provider/model from its latest request/header fold), and applies the generated title after an editable preview.",
   "type": "module",
   "main": "lib/index.js",
